@@ -107,21 +107,7 @@ is an example of the absolute minimum configuration, and is used to keep
 track of the code size of the core runtime and VM.
 
 In addition, the following ports are provided in this repository:
- - [cc3200](ports/cc3200) -- Texas Instruments CC3200 (including PyCom WiPy).
- - [esp32](ports/esp32) -- Espressif ESP32 SoC (including ESP32S2, ESP32S3, ESP32C3).
- - [esp8266](ports/esp8266) -- Espressif ESP8266 SoC.
- - [mimxrt](ports/mimxrt) -- NXP m.iMX RT (including Teensy 4.x).
- - [nrf](ports/nrf) -- Nordic Semiconductor nRF51 and nRF52.
- - [pic16bit](ports/pic16bit) -- Microchip PIC 16-bit.
- - [powerpc](ports/powerpc) -- IBM PowerPC (including Microwatt)
- - [qemu-arm](ports/qemu-arm) -- QEMU-based emulated target, for testing)
- - [renesas-ra](ports/renesas-ra) -- Renesas RA family.
- - [rp2](ports/rp2) -- Raspberry Pi RP2040 (including Pico and Pico W).
- - [samd](ports/samd) -- Microchip (formerly Atmel) SAMD21 and SAMD51.
- - [stm32](ports/stm32) -- STMicroelectronics STM32 family (including F0, F4, F7, G0, G4, H7, L0, L4, WB)
- - [teensy](ports/teensy) -- Teensy 3.x.
- - [webassembly](ports/webassembly) -- Emscripten port targeting browsers and NodeJS.
- - [zephyr](ports/zephyr) -- Zephyr RTOS.
+ - [esp32](ports/esp32) -- Espressif ESP32 SoC (including ESP32-CAM module, ESP32S2, ESP32S3, ESP32C3).
 
 The MicroPython cross-compiler, mpy-cross
 -----------------------------------------

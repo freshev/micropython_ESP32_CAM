@@ -91,6 +91,7 @@ list(APPEND MICROPY_SOURCE_PORT
     machine_rtc.c
     machine_sdcard.c
     modespnow.c
+    modcamera.c
 )
 list(TRANSFORM MICROPY_SOURCE_PORT PREPEND ${MICROPY_PORT_DIR}/)
 list(APPEND MICROPY_SOURCE_PORT ${CMAKE_BINARY_DIR}/pins.c)
@@ -157,6 +158,11 @@ idf_component_register(
         ${MICROPY_PORT_DIR}
         ${MICROPY_BOARD_DIR}
         ${CMAKE_BINARY_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/components/esp32-camera/driver/include
+        ${CMAKE_CURRENT_LIST_DIR}/components/esp32-camera/driver/private_include
+        ${CMAKE_CURRENT_LIST_DIR}/components/esp32-camera/conversions/include
+        ${CMAKE_CURRENT_LIST_DIR}/components/esp32-camera/conversions/private_include
+        ${CMAKE_CURRENT_LIST_DIR}/components/esp32-camera/sensors/private_include
     REQUIRES
         ${IDF_COMPONENTS}
 )

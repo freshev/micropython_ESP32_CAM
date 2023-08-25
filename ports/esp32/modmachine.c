@@ -49,6 +49,7 @@
 #include "extmod/machine_spi.h"
 #include "modmachine.h"
 #include "machine_rtc.h"
+#include "esp_log.h"
 
 #if MICROPY_PY_MACHINE
 
@@ -268,6 +269,91 @@ STATIC mp_obj_t machine_enable_irq(mp_obj_t state_in) {
 }
 MP_DEFINE_CONST_FUN_OBJ_1(machine_enable_irq_obj, machine_enable_irq);
 
+
+//--------------------------------------------------------
+static int vprintf_redirected(const char *fmt, va_list ap)
+{
+    int ret = mp_vprintf(&mp_plat_print, fmt, ap);
+    return ret;
+}
+
+static vprintf_like_t orig_log_func = NULL;
+static vprintf_like_t prev_log_func = NULL;
+static vprintf_like_t mp_log_func = &vprintf_redirected;
+
+//--------------------------------------------------------------------------
+STATIC mp_obj_t mod_machine_log_level (mp_obj_t tag_in, mp_obj_t level_in) {
+    const char *tag = mp_obj_str_get_str(tag_in);
+    int32_t level = mp_obj_get_int(level_in);
+    if ((level < 0) || (level > 5)) {
+        mp_raise_ValueError("Log level 0~5 expected");
+    }
+
+    esp_log_level_set(tag, level);
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(mod_machine_log_level_obj, mod_machine_log_level);
+
+//---------------------------------------
+STATIC mp_obj_t mod_machine_logto_mp () {
+    if (orig_log_func == NULL) {
+        orig_log_func = esp_log_set_vprintf(mp_log_func);
+    }
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_0(mod_machine_logto_mp_obj, mod_machine_logto_mp);
+
+//----------------------------------------
+STATIC mp_obj_t mod_machine_logto_esp () {
+    if (orig_log_func != NULL) {
+        prev_log_func = esp_log_set_vprintf(orig_log_func);
+        orig_log_func = NULL;
+    }
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_0(mod_machine_logto_esp_obj, mod_machine_logto_esp);
+
+//--------------------------------------------------
+static void print_heap_info(multi_heap_info_t *info)
+{
+    mp_printf(&mp_plat_print, "              Free: %u\n", info->total_free_bytes);
+    mp_printf(&mp_plat_print, "         Allocated: %u\n", info->total_allocated_bytes);
+    mp_printf(&mp_plat_print, "      Minimum free: %u\n", info->minimum_free_bytes);
+    mp_printf(&mp_plat_print, "      Total blocks: %u\n", info->total_blocks);
+    mp_printf(&mp_plat_print, "Largest free block: %u\n", info->largest_free_block);
+    mp_printf(&mp_plat_print, "  Allocated blocks: %u\n", info->allocated_blocks);
+    mp_printf(&mp_plat_print, "       Free blocks: %u\n", info->free_blocks);
+}
+
+//---------------------------------------
+STATIC mp_obj_t machine_heap_info(void) {
+    multi_heap_info_t info;
+
+    mp_printf(&mp_plat_print, "Heap outside of MicroPython heap:\n---------------------------------\n");
+
+    heap_caps_get_info(&info, MALLOC_CAP_INTERNAL | MALLOC_CAP_32BIT | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+    print_heap_info(&info);
+
+#if CONFIG_SPIRAM
+#if CONFIG_SPIRAM_USE_MEMMAP
+        mp_printf(&mp_plat_print, "\nSPIRAM info (MEMMAP used):\n--------------------------\n");
+        mp_printf(&mp_plat_print, "            Total: %u\n", CONFIG_SPIRAM_SIZE);
+        mp_printf(&mp_plat_print, "Used for MPy heap: %u\n", mpy_heap_size);
+        mp_printf(&mp_plat_print, "  Free (not used): %u\n", CONFIG_SPIRAM_SIZE - mpy_heap_size);
+#else
+        mp_printf(&mp_plat_print, "\nSPIRAM info:\n------------\n");
+        heap_caps_get_info(&info, MALLOC_CAP_SPIRAM);
+        print_heap_info(&info);
+#endif
+#endif
+
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_0(machine_heap_info_obj, machine_heap_info);
+//---------------------------------------
+
+
 STATIC const mp_rom_map_elem_t machine_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_machine) },
 
@@ -315,7 +401,8 @@ STATIC const mp_rom_map_elem_t machine_module_globals_table[] = {
     #if MICROPY_PY_MACHINE_DAC
     { MP_ROM_QSTR(MP_QSTR_DAC), MP_ROM_PTR(&machine_dac_type) },
     #endif
-    { MP_ROM_QSTR(MP_QSTR_I2C), MP_ROM_PTR(&machine_i2c_type) },
+    //{ MP_ROM_QSTR(MP_QSTR_I2C), MP_ROM_PTR(&machine_i2c_type) },
+    { MP_ROM_QSTR(MP_QSTR_I2C), MP_ROM_PTR(&machine_hw_i2c_type) },
     { MP_ROM_QSTR(MP_QSTR_SoftI2C), MP_ROM_PTR(&mp_machine_soft_i2c_type) },
     #if MICROPY_PY_MACHINE_I2S
     { MP_ROM_QSTR(MP_QSTR_I2S), MP_ROM_PTR(&machine_i2s_type) },
@@ -342,6 +429,14 @@ STATIC const mp_rom_map_elem_t machine_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_TIMER_WAKE), MP_ROM_INT(ESP_SLEEP_WAKEUP_TIMER) },
     { MP_ROM_QSTR(MP_QSTR_TOUCHPAD_WAKE), MP_ROM_INT(ESP_SLEEP_WAKEUP_TOUCHPAD) },
     { MP_ROM_QSTR(MP_QSTR_ULP_WAKE), MP_ROM_INT(ESP_SLEEP_WAKEUP_ULP) },
+
+    { MP_OBJ_NEW_QSTR(MP_QSTR_loglevel),    MP_ROM_PTR(&mod_machine_log_level_obj) },
+    { MP_OBJ_NEW_QSTR(MP_QSTR_redirectlog), MP_ROM_PTR(&mod_machine_logto_mp_obj) },
+    { MP_OBJ_NEW_QSTR(MP_QSTR_restorelog),  MP_ROM_PTR(&mod_machine_logto_esp_obj) },
+
+    // Heap
+    { MP_ROM_QSTR(MP_QSTR_heap_info),       MP_ROM_PTR(&machine_heap_info_obj) },
+
 };
 
 STATIC MP_DEFINE_CONST_DICT(machine_module_globals, machine_module_globals_table);
