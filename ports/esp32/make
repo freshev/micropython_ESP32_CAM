@@ -1,5 +1,5 @@
 #!/bin/bash
 
-git submodule update --init ../../lib/berkeley-db-1.xx
+git submodule update --init
 idf.py -DMICROPY_BOARD=ESP32_CAM build
 cd ./build;esptool.py --chip esp32 merge_bin -o firwmare_camera.bin @flash_args;cd ..

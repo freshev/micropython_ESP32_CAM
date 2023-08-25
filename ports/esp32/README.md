@@ -1,11 +1,14 @@
-MicroPython port to the ESP32
-=============================
+MicroPython port to the ESP32-CAM
+================================
 
 This is a port of MicroPython to the Espressif ESP32 series of
 microcontrollers.  It uses the ESP-IDF framework and MicroPython runs as
 a task under FreeRTOS.
 
 Supported features include:
+- Using of PSRAM 
+- Using configurable I2C hardware with I2C slave mode
+- Using wrapper for ESP-logging
 - REPL (Python prompt) over UART0.
 - 16k stack for the MicroPython task and approximately 100k Python heap.
 - Many of MicroPython's features are enabled: unicode, arbitrary-precision
@@ -18,6 +21,9 @@ Supported features include:
 - Bluetooth low-energy (BLE) support via the bluetooth module.
 
 Initial development of this ESP32 port was sponsored in part by Microbric Pty Ltd.
+PSRAM, I2C driver and ESP-logging commonly used from 
+[MicroPython_ESP32_psRAM_LoBo](https://github.com/loboris/MicroPython_ESP32_psRAM_LoBo).
+rewritten to use ESP-IDF v5.0.2
 
 Setting up ESP-IDF and the build environment
 --------------------------------------------
@@ -89,11 +95,10 @@ Then to build MicroPython for the ESP32 run:
 
 ```bash
 $ cd ports/esp32
-$ make submodules
-$ make
+$ ./make.sh
 ```
 
-This will produce a combined `firmware.bin` image in the `build-GENERIC/`
+This will produce a combined `firmware-camera.bin` image in the `build/`
 subdirectory (this firmware image is made up of: bootloader.bin, partitions.bin
 and micropython.bin).
 
@@ -114,30 +119,15 @@ after installing any other firmware, you should first erase the flash
 completely:
 
 ```bash
-$ make erase
+$ ./mclean.sh
 ```
 
-To flash the MicroPython firmware to your ESP32 use:
-
-```bash
-$ make deploy
-```
-
-The default ESP32 board build by the above commands is the `GENERIC` one, which
-should work on most ESP32 modules.  You can specify a different board by passing
-`BOARD=<board>` to the make commands, for example:
-
-```bash
-$ make BOARD=GENERIC_SPIRAM
-```
-
-Note: the above "make" commands are thin wrappers for the underlying `idf.py`
+Note: the above "make.sh" commands are thin wrappers for the underlying `idf.py`
 build tool that is part of the ESP-IDF.  You can instead use `idf.py` directly,
 for example:
 
 ```bash
-$ idf.py build
-$ idf.py -D MICROPY_BOARD=GENERIC_SPIRAM build
+$ idf.py -D MICROPY_BOARD=ESP32_CAM build
 $ idf.py flash
 ```
 
@@ -160,66 +150,55 @@ $ miniterm.py /dev/ttyUSB0 115200
 
 You can also use `idf.py monitor`.
 
-Configuring the WiFi and using the board
-----------------------------------------
 
-The ESP32 port is designed to be (almost) equivalent to the ESP8266 in
-terms of the modules and user-facing API.  There are some small differences,
-notably that the ESP32 does not automatically connect to the last access
-point when booting up.  But for the most part the documentation and tutorials
-for the ESP8266 should apply to the ESP32 (at least for the components that
-are implemented).
+Configuring camera with ESP32-CAM board
+---------------------------------------
 
-See http://docs.micropython.org/en/latest/esp8266/esp8266/quickref.html for
-a quick reference, and http://docs.micropython.org/en/latest/esp8266/esp8266/tutorial/intro.html
-for a tutorial.
-
-The following function can be used to connect to a WiFi access point (you can
-either pass in your own SSID and password, or change the defaults so you can
-quickly call `wlan_connect()` and it just works):
 ```python
-def wlan_connect(ssid='MYSSID', password='MYPASS'):
-    import network
-    wlan = network.WLAN(network.STA_IF)
-    if not wlan.active() or not wlan.isconnected():
-        wlan.active(True)
-        print('connecting to:', ssid)
-        wlan.connect(ssid, password)
-        while not wlan.isconnected():
-            pass
-    print('network config:', wlan.ifconfig())
+import camera
+
+camera.init(0, format = camera.JPEG)
+flash = Pin(4, Pin.OUT, 0)
+buf = camera.capture()
+print(len(buf)
 ```
 
-Note that some boards require you to configure the WiFi antenna before using
-the WiFi.  On Pycom boards like the LoPy and WiPy 2.0 you need to execute the
-following code to select the internal antenna (best to put this line in your
-boot.py file):
+Configuring the I2C Slave mode with ESP32-CAM board
+---------------------------------------------------
+
+The callback version is:
+
+```python
+from machine import I2C
+
+uplink=I2C(scl=12, sda=13, mode=I2C.SLAVE)
+uplink.callback(lambda res:print(res.getcbdata())) #read all bytes from I2C master node
+```
+
+or use getdata function
+
+```python
+from machine import I2C
+
+uplink=I2C(scl=12, sda=13, mode=I2C.SLAVE)
+uplink.getdata(0, 10) # read 10 bytes from I2C master node
+```
+
+Configuring the ESP-logging
+---------------------------
+
 ```python
 import machine
-antenna = machine.Pin(16, machine.Pin.OUT, value=0)
+machine.loglevel("*",5)
+machine.redirectlog()
+...
+machine.restorelog()
 ```
 
-Defining a custom ESP32 board
------------------------------
+Getting heap info
+-----------------
 
-The default ESP-IDF configuration settings are provided by the `GENERIC`
-board definition in the directory `boards/GENERIC`. For a custom configuration
-you can define your own board directory.  Start a new board configuration by
-copying an existing one (like `GENERIC`) and modifying it to suit your board.
-
-MicroPython specific configuration values are defined in the board-specific
-`mpconfigboard.h` file, which is included by `mpconfigport.h`.  Additional
-settings are put in `mpconfigboard.cmake`, including a list of `sdkconfig`
-files that configure ESP-IDF settings.  Some standard `sdkconfig` files are
-provided in the `boards/` directory, like `boards/sdkconfig.ble`.  You can
-also define custom ones in your board directory.
-
-See existing board definitions for further examples of configuration.
-
-Configuration
-Troubleshooting
----------------
-
-* Continuous reboots after programming: Ensure `CONFIG_ESPTOOLPY_FLASHMODE` is
-  correct for your board (e.g. ESP-WROOM-32 should be DIO). Then perform a
-  `make clean`, rebuild, redeploy.
+```python
+import machine
+machine.heap_info()
+```

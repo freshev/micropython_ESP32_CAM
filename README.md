@@ -2,10 +2,6 @@
 
 The MicroPython project
 =======================
-<p align="center">
-  <img src="https://raw.githubusercontent.com/micropython/micropython/master/logo/upython-with-micro.jpg" alt="MicroPython Logo"/>
-</p>
-
 This is the MicroPython project, which aims to put an implementation
 of Python 3.x on microcontrollers and small embedded systems.
 You can find the official website at [micropython.org](http://www.micropython.org).
@@ -132,3 +128,8 @@ Before compiling a given port, use
     $ make submodules
 
 to ensure that all required submodules are initialised.
+
+
+Micropython ESP32-CAM fork specific
+-----------------------------------
+See [this](https://github.com/freshev/micropython_ESP32_CAM/tree/master/ports/esp32) for ESP32-CAM documentation.
