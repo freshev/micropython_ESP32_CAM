@@ -78,23 +78,16 @@ The `install.sh` step only needs to be done once. You will need to source
 Building the firmware
 ---------------------
 
-The MicroPython cross-compiler must be built to pre-compile some of the
-built-in scripts to bytecode.  This can be done by (from the root of
-this repository):
-
-```bash
-$ make -C mpy-cross
-```
-
-Then to build MicroPython for the ESP32 run:
+To build MicroPython for the ESP32-CAM run:
 
 ```bash
 $ cd ports/esp32
+$ ./install.sh
 $ ./make.sh
 ```
 
-This will produce a combined `firmware_camera.bin` image in the `build/`
-subdirectory (this firmware image is made up of: bootloader.bin, partitions.bin
+This will produce a combined `firmware_camera.bin` image in the `./firmware/`
+folder (this firmware image is made up of: bootloader.bin, partitions.bin
 and micropython.bin).
 
 To flash the firmware you can use esptool.py
