@@ -6,9 +6,9 @@ microcontrollers.  It uses the ESP-IDF framework and MicroPython runs as
 a task under FreeRTOS.
 
 Supported features include:
-- Using of PSRAM 
-- Using configurable I2C hardware with I2C slave mode
-- Using wrapper for ESP-logging
+- Using of board PSRAM.
+- Configurable hardware I2C. I2C slave mode support.
+- Wrapper for ESP-logging.
 - REPL (Python prompt) over UART0.
 - 16k stack for the MicroPython task and approximately 100k Python heap.
 - Many of MicroPython's features are enabled: unicode, arbitrary-precision
@@ -21,8 +21,9 @@ Supported features include:
 - Bluetooth low-energy (BLE) support via the bluetooth module.
 
 Initial development of this ESP32 port was sponsored in part by Microbric Pty Ltd.
+
 PSRAM, I2C driver and ESP-logging commonly used from 
-[MicroPython_ESP32_psRAM_LoBo](https://github.com/loboris/MicroPython_ESP32_psRAM_LoBo).
+[MicroPython_ESP32_psRAM_LoBo](https://github.com/loboris/MicroPython_ESP32_psRAM_LoBo)
 rewritten to use ESP-IDF v5.0.2
 
 Setting up ESP-IDF and the build environment
@@ -38,12 +39,6 @@ Currently MicroPython supports only v5.0.2.
 
 To install the ESP-IDF the full instructions can be found at the
 [Espressif Getting Started guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html#installation-step-by-step).
-
-If you are on a Windows machine then the [Windows Subsystem for
-Linux](https://msdn.microsoft.com/en-au/commandline/wsl/install_guide) is the
-most efficient way to install the ESP32 toolchain and build the project. If
-you use WSL then follow the Linux instructions rather than the Windows
-instructions.
 
 The Espressif instructions will guide you through using the `install.sh`
 (or `install.bat`) script to download the toolchain and set up your environment.
@@ -98,28 +93,14 @@ $ cd ports/esp32
 $ ./make.sh
 ```
 
-This will produce a combined `firmware-camera.bin` image in the `build/`
+This will produce a combined `firmware_camera.bin` image in the `build/`
 subdirectory (this firmware image is made up of: bootloader.bin, partitions.bin
 and micropython.bin).
 
-To flash the firmware you must have your ESP32 module in the bootloader
-mode and connected to a serial port on your PC.  Refer to the documentation
-for your particular ESP32 module for how to do this.
-You will also need to have user permissions to access the `/dev/ttyUSB0` device.
-On Linux, you can enable this by adding your user to the `dialout` group, and
-rebooting or logging out and in again. (Note: on some distributions this may
-be the `uucp` group, run `ls -la /dev/ttyUSB0` to check.)
+To flash the firmware you can use esptool.py
 
 ```bash
-$ sudo adduser <username> dialout
-```
-
-If you are installing MicroPython to your module for the first time, or
-after installing any other firmware, you should first erase the flash
-completely:
-
-```bash
-$ ./mclean.sh
+$ esptool.py --chip auto --port /dev/ttyUSB0 --baud 921600 write_flash -z 0x0000 firwmare_camera.bin
 ```
 
 Note: the above "make.sh" commands are thin wrappers for the underlying `idf.py`
@@ -148,6 +129,21 @@ or
 $ miniterm.py /dev/ttyUSB0 115200
 ```
 
+The UART protocol for ESP32-CAM board use disabled RTS and DTR 
+So you can not use putty to get REPL prompt.
+
+For use [Thonny](https://thonny.org/) make changes into Thonny configuration.ini
+
+```bash
+[ESP32]
+...
+dtr = False
+rts = False
+```
+
+To use AMPY micropython tool use [this](https://github.com/freshev/Universal_AMPY).
+This tool is proposed by [rt-thread VSCode extension for micropython](https://github.com/SummerGift/micropython-tools).
+
 You can also use `idf.py monitor`.
 
 
@@ -156,11 +152,12 @@ Configuring camera with ESP32-CAM board
 
 ```python
 import camera
+from machine import I2C, Pin
 
 camera.init(0, format = camera.JPEG)
 flash = Pin(4, Pin.OUT, 0)
 buf = camera.capture()
-print(len(buf)
+print(len(buf))
 ```
 
 Configuring the I2C Slave mode with ESP32-CAM board
@@ -202,3 +199,21 @@ Getting heap info
 import machine
 machine.heap_info()
 ```
+
+Autorun
+-------
+In order to inject main.py script right into firmware this fork use:
+1) default_main.py script
+2) default_main.sh build script
+
+default_main.py transforms into main.py in the board filesystem.
+
+Add desired content to default_main.py
+
+Run 
+```bash
+$ ./default_main.sh
+$ ./make
+```
+
+To disable this feature remove script ./ports/esp32/modules/boot.py

@@ -1,6 +1,4 @@
 set(IDF_TARGET esp32)
-#set(CONFIG_ESP32_REV_MIN_3 "y")
-#add_compile_options(-Os)
 
 set(SDKCONFIG_DEFAULTS
     boards/sdkconfig.base
