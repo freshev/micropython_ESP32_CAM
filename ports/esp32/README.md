@@ -129,7 +129,7 @@ or
 $ miniterm.py /dev/ttyUSB0 115200
 ```
 
-The UART protocol for ESP32-CAM board use disabled RTS and DTR 
+The UART protocol for ESP32-CAM board use disabled RTS and DTR.
 So you can not use putty to get REPL prompt.
 
 For use [Thonny](https://thonny.org/) make changes into Thonny configuration.ini
@@ -206,14 +206,28 @@ In order to inject main.py script right into firmware this fork use:
 1) default_main.py script
 2) default_main.sh build script
 
-default_main.py transforms into main.py in the board filesystem.
+default_main.py transforms to main.py into the board filesystem during boot board process.
 
-Add desired content to default_main.py
+To integrate this add desired content to default_main.py and run 
 
-Run 
 ```bash
 $ ./default_main.sh
 $ ./make
 ```
 
-To disable this feature remove script ./ports/esp32/modules/boot.py
+To disable this feature just remove script ./ports/esp32/modules/boot.py and remake
+```bash
+$ ./mclean.sh
+$ ./make
+```
+
+Troubleshooting
+---------------
+
+Camera init failed error happens when no PSRAM available on board, or micropython compiled with no PSRAM support.
+
+Try
+```bash
+$ ./mclean.sh
+$ ./make
+```
