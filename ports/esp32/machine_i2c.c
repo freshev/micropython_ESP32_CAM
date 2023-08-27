@@ -49,6 +49,7 @@
 #define I2C_SLAVE_DEFAULT_BUFF_LEN  256   // default slave buffer length
 #define I2C_SLAVE_ADDR_DEFAULT      44    // default slave address
 #define I2C_SLAVE_MUTEX_TIMEOUT     (500 / portTICK_PERIOD_MS)
+#define I2C_SLAVE_READ_TIMEOUT      (10 / portTICK_PERIOD_MS)
 
 #define I2C_SLAVE_TASK_STACK_SIZE   832
 
@@ -66,15 +67,15 @@ typedef struct _mp_machine_i2c_obj_t {
     uint8_t sda;
     int8_t bus_id;
     i2c_cmd_handle_t cmd;
-    uint16_t rx_buflen;    // low level commands receive buffer length
-    uint16_t rx_bufidx;    // low level commands receive buffer index
-    uint8_t *rx_data;      // low level commands receive buffer
-    int8_t slave_addr;     // slave only, slave 8-bit address
-    uint16_t slave_buflen; // slave only, data buffer length
-    uint16_t slave_rolen;  // slave only, read only buffer area length
-    uint32_t *slave_cb;    // slave only, slave callback function
-    uint8_t *cbrx_data;    // callback rx buffer
-    uint16_t cbrx_len;     // callback rx buffer length
+    uint16_t rx_buflen;      // low level commands receive buffer length
+    uint16_t rx_bufidx;      // low level commands receive buffer index
+    uint8_t *rx_data;        // low level commands receive buffer
+    int8_t slave_addr;       // slave only, slave 8-bit address
+    uint16_t slave_rbuflen;  // slave only, read buffer length
+    uint16_t slave_wbuflen;  // slave only, write buffer length
+    uint32_t *slave_cb;      // slave only, slave callback function
+    uint8_t *cbrx_data;      // callback rx buffer
+    uint16_t cbrx_len;       // callback rx buffer length
     bool slave_busy;
 } mp_machine_i2c_obj_t;
 
@@ -88,6 +89,13 @@ static TaskHandle_t i2c_slave_task_handle = NULL;
 // ============================================================================================
 // === Low level I2C functions using esp-idf i2c-master driver ================================
 // ============================================================================================
+
+void machine_i2c_init0() {
+    for (i2c_port_t p = 0; p < I2C_MODE_MAX; p++) {
+        i2c_reset_rx_fifo(p);
+        i2c_reset_tx_fifo(p);
+    }
+}
 
 //--------------------------------------------------------------
 STATIC esp_err_t i2c_init_master (mp_machine_i2c_obj_t *i2c_obj)
@@ -122,7 +130,7 @@ STATIC esp_err_t i2c_init_slave (mp_machine_i2c_obj_t *i2c_obj, bool busy)
     conf.clk_flags = 0;
 
     i2c_param_config(i2c_obj->bus_id, &conf);
-    return i2c_driver_install(i2c_obj->bus_id, conf.mode, i2c_obj->slave_buflen, i2c_obj->slave_rolen, ESP_INTR_FLAG_IRAM);
+    return i2c_driver_install(i2c_obj->bus_id, conf.mode, i2c_obj->slave_rbuflen, i2c_obj->slave_wbuflen, ESP_INTR_FLAG_IRAM);
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -241,30 +249,31 @@ STATIC void i2c_slave_task(void *self_in)
     bool to_exit = false;
 
     mp_machine_i2c_obj_t *i2c_obj = (mp_machine_i2c_obj_t *)self_in;
-    if (i2c_obj->slave_buflen == 0) goto exit;
+    if (i2c_obj->slave_rbuflen == 0) goto exit;
 
     if (i2c_obj->cbrx_data != NULL) free(i2c_obj->cbrx_data);
-    i2c_obj->cbrx_data = malloc(i2c_obj->slave_buflen);
+    i2c_obj->cbrx_data = malloc(i2c_obj->slave_rbuflen);
     if (i2c_obj->cbrx_data == NULL) goto exit;
 
     while (1) {
         if (i2c_obj != NULL && i2c_obj->bus_id < I2C_NUM_MAX) {
-            if (slave_mutex[i2c_obj->bus_id]) xSemaphoreTake(slave_mutex[i2c_obj->bus_id], I2C_SLAVE_MUTEX_TIMEOUT);
+            //if (slave_mutex[i2c_obj->bus_id]) xSemaphoreTake(slave_mutex[i2c_obj->bus_id], I2C_SLAVE_MUTEX_TIMEOUT); // was I2C_SLAVE_MUTEX_TIMEOUT
+            if (slave_mutex[i2c_obj->bus_id]) xSemaphoreTake(slave_mutex[i2c_obj->bus_id], I2C_SLAVE_READ_TIMEOUT); // was I2C_SLAVE_MUTEX_TIMEOUT
 
             if (i2c_obj->cbrx_data != NULL) {
                 int log_level = esp_log_level_get(I2C_TAG);
                 esp_log_level_set(I2C_TAG, 0);
-                res = i2c_slave_read_buffer(i2c_obj->bus_id, i2c_obj->cbrx_data, i2c_obj->slave_buflen, I2C_SLAVE_MUTEX_TIMEOUT);
+                res = i2c_slave_read_buffer(i2c_obj->bus_id, i2c_obj->cbrx_data, i2c_obj->slave_rbuflen, I2C_SLAVE_READ_TIMEOUT);
                 esp_log_level_set(I2C_TAG, log_level);
 
                 if (res > 0) {
                     i2c_obj->cbrx_len = res;
-                    ESP_LOGI(I2C_DEBUG_TAG, "Received %d B", res);
+                    //ESP_LOGI(I2C_DEBUG_TAG, "Received %d B", res);
                     if (i2c_obj->slave_cb) {
                         mp_sched_schedule(i2c_obj->slave_cb, MP_OBJ_FROM_PTR(i2c_obj));
                     }
                 } else if(res < 0) {
-                    ESP_LOGI(I2C_DEBUG_TAG, "Slave read buffer returns %d", res);
+                    //ESP_LOGI(I2C_DEBUG_TAG, "Slave read buffer returns %d", res);
                     to_exit = true;
                 }
             } else {
@@ -277,7 +286,7 @@ STATIC void i2c_slave_task(void *self_in)
             to_exit = true;
         }
 
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        vTaskDelay(I2C_SLAVE_READ_TIMEOUT);
         if(to_exit) break;
     }
 exit:
@@ -291,7 +300,7 @@ exit:
 // === I2C MicroPython bindings ===============================================================
 // ============================================================================================
 
-enum { ARG_id, ARG_mode, ARG_speed, ARG_freq, ARG_sda, ARG_scl, ARG_slaveaddr, ARG_slavebuflen, ARG_rolen, ARG_busy };
+enum { ARG_id, ARG_mode, ARG_speed, ARG_freq, ARG_sda, ARG_scl, ARG_slaveaddr, ARG_rbuflen, ARG_wbuflen, ARG_busy };
 
 // Arguments for new object and init method
 //----------------------------------------------------------
@@ -303,8 +312,8 @@ STATIC const mp_arg_t mp_machine_i2c_init_allowed_args[] = {
     { MP_QSTR_sda,   MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
     { MP_QSTR_scl,   MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
     { MP_QSTR_slave_addr,    MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
-    { MP_QSTR_slave_bufflen, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
-    { MP_QSTR_slave_rolen,   MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
+    { MP_QSTR_slave_rbuflen, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
+    { MP_QSTR_slave_wbuflen, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
     { MP_QSTR_slave_busy,    MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
 };
 
@@ -364,8 +373,8 @@ STATIC void mp_machine_i2c_print(const mp_print_t *print, mp_obj_t self_in, mp_p
         if (self->mode == I2C_MODE_MASTER)
             mp_printf(print, "I2C (Port=%u, Mode=MASTER, Speed=%u Hz, sda=%d, scl=%d)", self->bus_id, self->speed, self->sda, self->scl);
         else {
-            mp_printf(print, "I2C (Port=%u, Mode=SLAVE, Speed=%u Hz, sda=%d, scl=%d, addr=%d, buffer=%d B, read-only=%d B)",
-                      self->bus_id, self->speed, self->sda, self->scl, self->slave_addr, self->slave_buflen, self->slave_rolen);
+            mp_printf(print, "I2C (Port=%u, Mode=SLAVE, Speed=%u Hz, sda=%d, scl=%d, addr=%d, read_buffer=%d B, write_buffer=%d B)",
+                      self->bus_id, self->speed, self->sda, self->scl, self->slave_addr, self->slave_rbuflen, self->slave_wbuflen);
 
             mp_printf(print, "\n     Callback=%s Data=%d B", self->slave_cb ? "True" : "False", self->cbrx_len);
             if (i2c_slave_task_handle) {
@@ -426,8 +435,8 @@ mp_obj_t mp_machine_i2c_make_new(const mp_obj_type_t *type, size_t n_args, size_
     self->rx_buflen = 0;
     self->rx_bufidx = 0;
     self->rx_data = NULL;
-    self->slave_buflen = 0;
-    self->slave_rolen = 0;
+    self->slave_rbuflen = 0;
+    self->slave_wbuflen = 0;
     self->slave_addr = 0;
     self->slave_cb = NULL;
     self->slave_busy = false;
@@ -454,14 +463,18 @@ mp_obj_t mp_machine_i2c_make_new(const mp_obj_type_t *type, size_t n_args, size_
         else self->slave_addr = I2C_SLAVE_ADDR_DEFAULT;
 
         // Set I2C slave buffers
-        if ((args[ARG_slavebuflen].u_int >= I2C_SLAVE_MIN_BUFFER_LENGTH) && (args[ARG_slavebuflen].u_int <= I2C_SLAVE_MAX_BUFFER_LENGTH)) 
-            self->slave_buflen = args[ARG_slavebuflen].u_int;
-        else self->slave_buflen = I2C_SLAVE_DEFAULT_BUFF_LEN;
+        if ((args[ARG_rbuflen].u_int >= I2C_SLAVE_MIN_BUFFER_LENGTH) && (args[ARG_rbuflen].u_int <= I2C_SLAVE_MAX_BUFFER_LENGTH)) 
+            self->slave_rbuflen = args[ARG_rbuflen].u_int;
+        else self->slave_rbuflen = I2C_SLAVE_DEFAULT_BUFF_LEN;
 
-        if ((args[ARG_rolen].u_int > 0) && (args[ARG_rolen].u_int < (self->slave_buflen / 2)))
-            self->slave_rolen = args[ARG_rolen].u_int;
-        else self->slave_rolen = 0;
-        if ((self->slave_busy) && (self->slave_rolen == 0)) self->slave_rolen = 1;
+
+        //if ((args[ARG_wbuflen].u_int > 0) && (args[ARG_wbuflen].u_int < (self->slave_rbuflen / 2)))
+        //    self->slave_wbuflen = args[ARG_wbuflen].u_int;
+        //else self->slave_wbuflen = 0;
+        if (args[ARG_wbuflen].u_int > 0) self->slave_wbuflen = args[ARG_wbuflen].u_int;
+        else self->slave_wbuflen = 0;
+
+        if ((self->slave_busy) && (self->slave_wbuflen == 0)) self->slave_wbuflen = 1;
 
         if (i2c_init_slave(self, self->slave_busy) != ESP_OK) {
             mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("Error installing I2C driver (init slave failed)"));
@@ -518,8 +531,8 @@ STATIC mp_obj_t mp_machine_i2c_init(size_t n_args, const mp_obj_t *pos_args, mp_
 
     scl = self->scl;
     sda = self->sda;
-    buff_len = self->slave_buflen;
-    ro_len = self->slave_rolen;
+    buff_len = self->slave_rbuflen;
+    ro_len = self->slave_wbuflen;
     slave_addr = self->slave_addr;
 
     if (args[ARG_sda].u_obj != MP_OBJ_NULL) {
@@ -539,7 +552,7 @@ STATIC mp_obj_t mp_machine_i2c_init(size_t n_args, const mp_obj_t *pos_args, mp_
         if (args[ARG_busy].u_int >= 0) {
             if (self->slave_busy != ((args[ARG_busy].u_int == 1) ? true : false)) {
                 self->slave_busy = (args[ARG_busy].u_int == 1) ? true : false;
-                if ((self->slave_busy) && (self->slave_rolen == 0)) self->slave_rolen = 1;
+                if ((self->slave_busy) && (self->slave_wbuflen == 0)) self->slave_wbuflen = 1;
                 changed++;
             }
         }
@@ -550,16 +563,16 @@ STATIC mp_obj_t mp_machine_i2c_init(size_t n_args, const mp_obj_t *pos_args, mp_
                 changed++;
             }
         }
-        if ((args[ARG_slavebuflen].u_int >= I2C_SLAVE_MIN_BUFFER_LENGTH) && (args[ARG_slavebuflen].u_int <= I2C_SLAVE_MAX_BUFFER_LENGTH)) {
-            if (args[ARG_slavebuflen].u_int != buff_len) {
-                buff_len = args[ARG_slavebuflen].u_int;
+        if ((args[ARG_rbuflen].u_int >= I2C_SLAVE_MIN_BUFFER_LENGTH) && (args[ARG_rbuflen].u_int <= I2C_SLAVE_MAX_BUFFER_LENGTH)) {
+            if (args[ARG_rbuflen].u_int != buff_len) {
+                buff_len = args[ARG_rbuflen].u_int;
                 changed++;
             }
         }
-        if ((args[ARG_rolen].u_int > 0) && (args[ARG_rolen].u_int < (buff_len/2))) {
-            if (args[ARG_rolen].u_int != ro_len) {
-                ro_len = args[ARG_rolen].u_int;
-                if ((self->slave_busy) && (self->slave_rolen == 0)) self->slave_rolen = 1;
+        if ((args[ARG_wbuflen].u_int > 0) && (args[ARG_wbuflen].u_int < (buff_len/2))) {
+            if (args[ARG_wbuflen].u_int != ro_len) {
+                ro_len = args[ARG_wbuflen].u_int;
+                if ((self->slave_busy) && (self->slave_wbuflen == 0)) self->slave_wbuflen = 1;
                 changed++;
             }
         }
@@ -594,8 +607,8 @@ STATIC mp_obj_t mp_machine_i2c_init(size_t n_args, const mp_obj_t *pos_args, mp_
         } else {
             // Setup I2C slave
             self->slave_addr = slave_addr;
-            self->slave_buflen = buff_len;
-            self->slave_rolen = ro_len;
+            self->slave_rbuflen = buff_len;
+            self->slave_wbuflen = ro_len;
             if (i2c_init_slave(self, self->slave_busy) != ESP_OK) {
                 if (slave_mutex[self->bus_id]) xSemaphoreGive(slave_mutex[self->bus_id]);
                 mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("Error installing I2C driver (init slave failed)"));
@@ -804,8 +817,8 @@ STATIC mp_obj_t mp_machine_i2c_readfrom_mem(size_t n_args, const mp_obj_t *pos_a
         vstr_init_len(&vstr, n);
         memcpy(vstr.buf, buf, n);
         free(buf);
-        // Return read data as string
 
+        // Return read data as string
         //return mp_obj_new_str_from_vstr(&mp_type_bytes, &vstr);
         return mp_obj_new_str_from_vstr(&vstr);
     }
@@ -892,11 +905,6 @@ STATIC mp_obj_t mp_machine_i2c_deinit(mp_obj_t self_in) {
     if (i2c_used[self->bus_id] >= 0) {
         if ((self->mode == I2C_MODE_SLAVE) && (slave_mutex[self->bus_id])) xSemaphoreTake(slave_mutex[self->bus_id], I2C_SLAVE_MUTEX_TIMEOUT);
 
-        //if((self->mode == I2C_MODE_SLAVE) && i2c_slave_task_handle) {
-        //   vTaskDelete(i2c_slave_task_handle);
-        //   i2c_slave_task_handle = NULL;
-        //}
-
         i2c_used[self->bus_id] = -1;
         i2c_driver_delete(self->bus_id);
 
@@ -906,6 +914,23 @@ STATIC mp_obj_t mp_machine_i2c_deinit(mp_obj_t self_in) {
     return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_machine_i2c_deinit_obj, mp_machine_i2c_deinit);
+
+//-------------------------------------------------------
+STATIC mp_obj_t mp_machine_i2c_deinit_all() {
+
+    for(int i = 0; i < I2C_MODE_MAX; i++)
+    if (i2c_used[i] >= 0) {
+        if (slave_mutex[i]) xSemaphoreTake(slave_mutex[i], I2C_SLAVE_MUTEX_TIMEOUT);
+
+        i2c_used[i] = -1;
+        i2c_driver_delete(i);
+
+        if (slave_mutex[i]) xSemaphoreGive(slave_mutex[i]);
+    }
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_0(mp_machine_i2c_deinit_all_fun_obj, mp_machine_i2c_deinit_all);
+STATIC MP_DEFINE_CONST_STATICMETHOD_OBJ(mp_machine_i2c_deinit_all_obj, MP_ROM_PTR(&mp_machine_i2c_deinit_all_fun_obj));
 
 
 // ============================================================================================
@@ -1129,13 +1154,13 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_machine_i2c_end_obj, mp_machine_i2c_end);
 //-----------------------------------------------------------------
 void _check_addr_len(mp_machine_i2c_obj_t *self, int addr, int len)
 {
-    if ((len < 1) || (len > self->slave_buflen)) {
+    if ((len < 1) || (len > self->slave_rbuflen)) {
         mp_raise_ValueError("Length out of range");
     }
-    if (addr >= self->slave_buflen) {
+    if (addr >= self->slave_rbuflen) {
         mp_raise_ValueError("Address not in slave data buffer");
     }
-    if ((addr + len) > self->slave_buflen) {
+    if ((addr + len) > self->slave_rbuflen) {
         mp_raise_ValueError("Data outside buffer");
     }
 }
@@ -1146,16 +1171,17 @@ STATIC mp_obj_t mp_machine_i2c_slave_set_data(mp_obj_t self_in, mp_obj_t buf_in,
     mp_machine_i2c_obj_t *self = self_in;
     _checkSlave(self);
 
+    if(self->slave_wbuflen == 0) mp_raise_ValueError("Write buffer length = 0. Use 'slave_wbuflen = value' in I2C constructor.");
+
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_READ);
-    ESP_LOGE(I2C_DEBUG_TAG, "bufinfo.len=%d", bufinfo.len);
-    //int addr = mp_obj_get_int(addr_in);
-    //_check_addr_len(self, addr, bufinfo.len);
 
     if (slave_mutex[self->bus_id]) xSemaphoreTake(slave_mutex[self->bus_id], I2C_SLAVE_MUTEX_TIMEOUT);
 
-    //int res = i2c_slave_write_buffer(self->bus_id, bufinfo.buf, addr,  bufinfo.len, I2C_SLAVE_MUTEX_TIMEOUT);
+    ESP_LOGE(I2C_DEBUG_TAG, "Writing [%d] = %p (%d)", self->bus_id, bufinfo.buf, bufinfo.len);
+
     int res = i2c_slave_write_buffer(self->bus_id, bufinfo.buf, bufinfo.len, I2C_SLAVE_MUTEX_TIMEOUT);
+    ESP_LOGE(I2C_DEBUG_TAG, "After write");
 
     if (slave_mutex[self->bus_id]) xSemaphoreGive(slave_mutex[self->bus_id]);
 
@@ -1232,12 +1258,14 @@ STATIC mp_obj_t mp_machine_i2c_slave_get_cbdata(mp_obj_t self_in)
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_machine_i2c_slave_get_cbdata_obj, mp_machine_i2c_slave_get_cbdata);
 
 //----------------------------------------------------------------------------------------------
+#define MP_OBJ_IS_METH(o) (MP_OBJ_IS_OBJ(o) && (((mp_obj_base_t*)MP_OBJ_TO_PTR(o))->type->name == MP_QSTR_bound_method))
+
 STATIC mp_obj_t mp_machine_i2c_slave_callback(mp_obj_t self_in, mp_obj_t func)
 {
     mp_machine_i2c_obj_t *self = self_in;
     _checkSlave(self);
 
-    if ((!MP_OBJ_IS_FUN(func)) && (func != mp_const_none)) {
+    if ((!MP_OBJ_IS_FUN(func)) && (!MP_OBJ_IS_METH(func)) && (func != mp_const_none)) {
         mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Function argument required"));
     }
 
@@ -1341,6 +1369,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_machine_i2c_timeout_obj, 1, 2, mp_
 STATIC const mp_rom_map_elem_t mp_machine_i2c_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_init),                (mp_obj_t)&mp_machine_i2c_init_obj },
     { MP_ROM_QSTR(MP_QSTR_deinit),              (mp_obj_t)&mp_machine_i2c_deinit_obj },
+    { MP_ROM_QSTR(MP_QSTR_deinit_all),          (mp_obj_t)&mp_machine_i2c_deinit_all_obj },
     { MP_ROM_QSTR(MP_QSTR_scan),                (mp_obj_t)&mp_machine_i2c_scan_obj },
     { MP_ROM_QSTR(MP_QSTR_is_ready),            (mp_obj_t)&mp_machine_i2c_is_ready_obj },
     { MP_ROM_QSTR(MP_QSTR_start_timing),        (mp_obj_t)&mp_machine_i2c_start_timing_obj },

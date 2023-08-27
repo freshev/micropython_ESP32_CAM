@@ -165,14 +165,17 @@ uplink=I2C(scl=12, sda=13, mode=I2C.SLAVE)
 uplink.callback(lambda res:print(res.getcbdata())) #read all bytes from I2C master node
 ```
 
-or use getdata function
+or use getdata/setdata function
 
 ```python
 from machine import I2C
 
-uplink=I2C(scl=12, sda=13, mode=I2C.SLAVE)
+uplink=I2C(scl=12, sda=13, mode=I2C.SLAVE, slave_wbuflen=32768)
 uplink.getdata(0, 10) # read 10 bytes from I2C master node
+uplink.setdata(bytearray(32768),0)
 ```
+Note that maximum write buffer length in slave mode limited to 64kB.
+Buffer length more then 32kB leads to unstable PSRAM read/write/operations, cyclic reboots etc. Use on your own risk.
 
 Configuring the ESP-logging
 ---------------------------
@@ -217,10 +220,80 @@ $ ./make
 Troubleshooting
 ---------------
 
-Camera init failed error happens when no PSRAM available on board, or micropython compiled with no PSRAM support.
+Firmware can not be burned to ESP32-CAM module while connected to I2C.
+Disconnect external I2C device and try again.
+Also this helps when cyclic reboot occurs:
+```bash
+rst:0x10 (RTCWDT_RTC_RESET),boot:0x33 (SPI_FAST_FLASH_BOOT)
+invalid header: 0xffffffff
+invalid header: 0xffffffff
+...
+```
+
+You get error "I2C bus already used" when I2C interface already inited. Use
+```python
+I2C.deinit_all()
+```
+
+"Camera init failed" error happens when no PSRAM available on board, or micropython compiled with no PSRAM support.
 
 Try
 ```bash
 $ ./mclean.sh
 $ ./make
 ```
+
+Full example
+------------
+Slave part on ESP32-CAM module:
+```python
+# micropython esp32 camera module in I2C slave mode
+from machine import WDT, I2C, Pin
+import camera
+import utime
+
+class cam_slave:
+
+    def __init__(self, scl = 12, sda = 13, freq=100000): # 100 MHz
+        self.buffer = []
+        camera.deinit()
+        camera.init(0, format = camera.JPEG)
+        self.flash = Pin(4, Pin.OUT, 0)
+        try:
+            self.uplink = I2C(scl = scl, sda = sda, freq = freq, mode = I2C.SLAVE, slave_wbuflen=60000) # 60 kB buffer
+        except OSError as ex:
+            if(ex.errno == 'I2C bus already used'):
+                print(ex)
+                I2C.deinit_all()
+                self.uplink = I2C(scl = scl, sda = sda, freq = freq, mode = I2C.SLAVE, slave_wbuflen=60000)
+            else: self.uplink = None
+        if (self.uplink is not None):
+            self.uplink.callback(self.i2ccb)
+        print(self.uplink)
+
+    def i2ccb(self, res):
+        com = res.getcbdata()
+        if com == b'flash-on':  self.flash.on(); self.ok()
+        if com == b'flash-off': self.flash.off(); self.ok()
+        if com == b'capture':   self.buffer = camera.capture(); self.ok()
+        if com == b'get':       self.ok(self.buffer)
+        print(com)
+
+    def ok(self, data = None):
+        if(self.uplink != None):
+            if(data != None):
+                self.uplink.setdata(bytearray([201]), 0) # send code 201
+                self.uplink.setdata(len(data).to_bytes(4,'little'), 0) #send 4 bytes (buffer length)
+                self.uplink.setdata(data, 0) #send buffer
+            else: self.uplink.setdata(bytearray([200]), 0) # send code 200
+
+
+cam_slave(scl = 12, sda = 13)
+
+wdt = WDT(timeout=120000) # WDT = 120 seconds
+
+while(1): # infinite loop
+    wdt.feed()
+    utime.sleep(1)
+```
+

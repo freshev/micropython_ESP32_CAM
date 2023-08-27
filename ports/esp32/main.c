@@ -123,6 +123,10 @@ soft_reset:
     machine_i2s_init0();
     #endif
 
+    #if MICROPY_PY_MACHINE_I2C
+    machine_i2c_init0();
+    #endif
+
     // run boot-up scripts
     pyexec_frozen_module("_boot.py", false);
     pyexec_file_if_exists("boot.py");
