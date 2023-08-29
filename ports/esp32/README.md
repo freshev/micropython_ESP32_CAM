@@ -6,7 +6,7 @@ microcontrollers.  It uses the ESP-IDF framework and MicroPython runs as
 a task under FreeRTOS.
 
 Supported features include:
-- Using of board PSRAM.
+- Using board's PSRAM.
 - Configurable hardware I2C. I2C slave mode support.
 - Wrapper for ESP-logging.
 - REPL (Python prompt) over UART0.
@@ -22,9 +22,9 @@ Supported features include:
 
 Initial development of this ESP32 port was sponsored in part by Microbric Pty Ltd.
 
-PSRAM, I2C driver and ESP-logging commonly used from 
+PSRAM, I2C driver and ESP logging commonly used from 
 [MicroPython_ESP32_psRAM_LoBo](https://github.com/loboris/MicroPython_ESP32_psRAM_LoBo)
-rewritten to use ESP-IDF v5.0.2
+rewritten to ESP-IDF v5.0.2 base.
 
 Setting up ESP-IDF and the build environment
 --------------------------------------------
@@ -201,20 +201,20 @@ machine.heap_info()
 
 Autorun
 -------
-In order to inject main.py script right into firmware this fork use:
-1) default_main.py script
-2) default_main.sh build script
+In order to inject "main.py" script right into firmware you can use:
+1) "default_main.py" script
+2) "default_main.sh" build script
 
-default_main.py transforms to main.py into the board filesystem during boot board process.
+"default_main.py" transforms to "main.py" at the board filesystem during board boot process.
 
-To integrate this add desired content to default_main.py and run 
+To do this add desired content to "default_main.py" and run:
 
 ```bash
 $ ./default_main.sh
 $ ./make
 ```
 
-To disable this feature just remove script ./ports/esp32/modules/boot.py and remake
+To disable this feature just remove script ./ports/esp32/modules/boot.py and remake:
 ```bash
 $ ./mclean.sh
 $ ./make
