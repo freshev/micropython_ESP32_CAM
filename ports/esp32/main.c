@@ -124,7 +124,7 @@ soft_reset:
     #endif
 
     #if MICROPY_PY_MACHINE_I2C
-    machine_i2c_init0();
+    //machine_i2c_init0();
     #endif
 
     // run boot-up scripts

@@ -1178,10 +1178,8 @@ STATIC mp_obj_t mp_machine_i2c_slave_set_data(mp_obj_t self_in, mp_obj_t buf_in,
 
     if (slave_mutex[self->bus_id]) xSemaphoreTake(slave_mutex[self->bus_id], I2C_SLAVE_MUTEX_TIMEOUT);
 
-    ESP_LOGE(I2C_DEBUG_TAG, "Writing [%d] = %p (%d)", self->bus_id, bufinfo.buf, bufinfo.len);
-
+    ESP_LOGI(I2C_DEBUG_TAG, "Writing [%d] = %p (%d)", self->bus_id, bufinfo.buf, bufinfo.len);
     int res = i2c_slave_write_buffer(self->bus_id, bufinfo.buf, bufinfo.len, I2C_SLAVE_MUTEX_TIMEOUT);
-    ESP_LOGE(I2C_DEBUG_TAG, "After write");
 
     if (slave_mutex[self->bus_id]) xSemaphoreGive(slave_mutex[self->bus_id]);
 
