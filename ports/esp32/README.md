@@ -324,7 +324,8 @@ cam_slave(scl = 12, sda = 13, freq=100000, wdt_timeout = 60000) #60 seconds for 
 while(1): utime.sleep(1) # infinite loop
 ```
 
-Master part on Ai-ThinkerM A9/A9G module:
+Master part on [Ai-ThinkerM A9/A9G module](https://github.com/Ai-Thinker-Open/GPRS_C_SDK) 
+with [micropython port by pulkin](https://github.com/pulkin/micropython/tree/master/ports/gprs_a9):
 ```python
 import i2c
 import utime
