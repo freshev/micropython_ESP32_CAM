@@ -1,3 +1,6 @@
+import uos
+uos.remove("main.py")
+
 import camera
 from machine import I2C, Pin
 
